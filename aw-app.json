@@ -1,0 +1,57 @@
+{
+  "manifest_version": 1,
+  "id": "code-agent-clis",
+  "name": "Code Agent CLIs",
+  "version": "0.1.0",
+  "description": "Installs AI coding-agent CLIs into the workspace: Claude Code (claude), OpenAI Codex (codex), GitHub Copilot CLI (copilot), and Cursor's cursor-agent. Pure command installs, no login/settings/secrets bundled here — each CLI still needs its own auth (e.g. `claude login`, `codex login`, `copilot`, `cursor-agent login`) run from a workspace terminal before use.",
+  "category": "Runnables",
+  "tier": "inprocess",
+  "publisher": "TekFlox",
+  "resource_estimate": {
+    "cpu": "low",
+    "memory": "low",
+    "disk": "medium"
+  },
+  "runtime": {
+    "python": ">=3.11",
+    "entrypoint": "code_agent_clis_app.plugin:CodeAgentClisAppPlugin",
+    "pip_requires": []
+  },
+  "permissions": [
+    "commands:install",
+    "fs:workspace-data",
+    "net:outbound"
+  ],
+  "contributes": {
+    "system_clis": [
+      {
+        "name": "claude",
+        "installer": "scripts/install_claude.sh"
+      },
+      {
+        "name": "codex",
+        "installer": "scripts/install_codex.sh"
+      },
+      {
+        "name": "copilot",
+        "installer": "scripts/install_copilot.sh"
+      },
+      {
+        "name": "cursor-agent",
+        "installer": "scripts/install_cursor.sh"
+      }
+    ]
+  },
+  "dependencies": {
+    "apps": [
+      {
+        "id": "essentials",
+        "version": ">=0.8.0",
+        "required": true,
+        "reason": "claude/codex/copilot are npm-published packages, installed through the Node.js dev toolkit (nvm/node/npm) that the essentials app owns — it must be installed/loaded first."
+      }
+    ],
+    "note": "Runtime-enforced app dependency: aw-workspace installs/loads essentials before code-agent-clis and keeps essentials loaded while code-agent-clis is desired."
+  },
+  "migrations": {}
+}
