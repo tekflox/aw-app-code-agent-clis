@@ -2,15 +2,14 @@
 # Installs OpenAI Codex CLI (@openai/codex) via npm, using the workspace's
 # shared Node.js toolkit (installed by the "essentials" app — see
 # dependencies.apps in aw-app.json; the reconciler installs it first).
-# Symlinks the resulting `codex` binary into the workspace's persistent
-# bin dir (same tree the F4 command-shim facade uses — always on PATH).
+# Symlinks the resulting `codex` binary into /usr/local/bin (regular
+# system PATH — needs sudo since the container's default user is non-root).
 # Idempotent — safe to re-run (on install, and on every reconcile pass
 # after workspace recreation).
 set -euo pipefail
 
 export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
-AW_BIN_DIR="${AW_WORKSPACE_HOME:-$HOME/.aw-workspace}/bin"
-mkdir -p "$AW_BIN_DIR"
+AW_BIN_DIR="/usr/local/bin"
 
 if [ ! -s "$NVM_DIR/nvm.sh" ]; then
   echo "install_codex.sh: nvm not found at $NVM_DIR — the essentials app (a required dependency) should have installed it" >&2
@@ -28,6 +27,6 @@ fi
 npm install -g @openai/codex >/dev/null
 
 NODE_BIN_DIR="$(dirname "$(nvm which default)")"
-ln -sf "$NODE_BIN_DIR/codex" "$AW_BIN_DIR/codex"
+sudo ln -sf "$NODE_BIN_DIR/codex" "$AW_BIN_DIR/codex"
 
 "$AW_BIN_DIR/codex" --version

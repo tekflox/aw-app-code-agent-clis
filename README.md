@@ -45,12 +45,13 @@ needs no Node.js — it ships as a standalone binary via its own installer.
   schema every `aw-app-*` repo validates against).
 - `scripts/install_claude.sh` / `install_codex.sh` / `install_copilot.sh` —
   same shape: source the essentials app's `nvm`, `npm install -g <pkg>`,
-  symlink the resulting binary into the workspace's persistent bin dir.
+  symlink the resulting binary into `/usr/local/bin` (regular system PATH —
+  needs `sudo` since the container's default user is non-root).
 - `scripts/install_cursor.sh` — Cursor's vendor installer, `$HOME` redirected
   to a dir under the workspace's persistent home (same reasoning
   `tools/aw-sandbox/Dockerfile` in the main `agentic-workspace` repo uses for
   its own `cursor-agent` install — the binary must land outside anything a
-  bind-mount could shadow).
+  bind-mount could shadow), then symlinked into `/usr/local/bin` the same way.
 - `scripts/uninstall.sh` — reverses all 4 (npm uninstall + symlink/dir
   removal). Does **not** remove `nvm`/`node` — that belongs to `essentials`.
 - `code_agent_clis_app/plugin.py` — `CodeAgentClisAppPlugin` entrypoint;

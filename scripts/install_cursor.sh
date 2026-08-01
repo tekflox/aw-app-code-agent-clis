@@ -7,8 +7,8 @@
 # (survives container recreation — same reasoning the aw-sandbox image's
 # own cursor-agent install uses, see tools/aw-sandbox/Dockerfile in the
 # main agentic-workspace repo) rather than the workspace's real $HOME.
-# The resolved binary is then symlinked into the workspace's persistent bin
-# dir (same tree the F4 command-shim facade uses — always on PATH).
+# The resolved binary is then symlinked into /usr/local/bin (regular
+# system PATH — needs sudo since the container's default user is non-root).
 # Idempotent — safe to re-run (on install, and on every reconcile pass
 # after workspace recreation).
 #
@@ -18,9 +18,9 @@
 set -euo pipefail
 
 AW_HOME="${AW_WORKSPACE_HOME:-$HOME/.aw-workspace}"
-AW_BIN_DIR="$AW_HOME/bin"
+AW_BIN_DIR="/usr/local/bin"
 CURSOR_HOME="$AW_HOME/cursor-agent"
-mkdir -p "$AW_BIN_DIR" "$CURSOR_HOME"
+mkdir -p "$CURSOR_HOME"
 
 if [ -x "$AW_BIN_DIR/cursor-agent" ] && "$AW_BIN_DIR/cursor-agent" --version >/dev/null 2>&1; then
   echo "cursor-agent already installed: $("$AW_BIN_DIR/cursor-agent" --version)"
@@ -31,6 +31,6 @@ command -v curl >/dev/null 2>&1 || { echo "install_cursor.sh: curl not found on 
 
 curl -fsS https://cursor.com/install | HOME="$CURSOR_HOME" bash
 
-ln -sf "$CURSOR_HOME/.local/bin/cursor-agent" "$AW_BIN_DIR/cursor-agent"
+sudo ln -sf "$CURSOR_HOME/.local/bin/cursor-agent" "$AW_BIN_DIR/cursor-agent"
 
 "$AW_BIN_DIR/cursor-agent" --version

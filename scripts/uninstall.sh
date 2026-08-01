@@ -4,7 +4,15 @@
 # action for every commands:install journal entry from this app).
 set -euo pipefail
 
-AW_BIN_DIR="${AW_WORKSPACE_HOME:-$HOME/.aw-workspace}/bin"
+# Removing symlinks from /usr/local/bin needs root — the container's
+# default user (ubuntu) is non-root, so re-exec ourselves under sudo. -E
+# keeps $HOME etc. pointed at ubuntu's, not root's (needed to find nvm and
+# cursor-agent's sandboxed $HOME below).
+if [ "$(id -u)" -ne 0 ]; then
+  exec sudo -E bash "$0" "$@"
+fi
+
+AW_BIN_DIR="/usr/local/bin"
 
 # claude / codex / copilot — npm global packages installed through the
 # shared Node.js toolkit owned by the "essentials" app dependency (nvm/node

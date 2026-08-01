@@ -9,7 +9,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-AW_BIN_DIR="${AW_WORKSPACE_HOME:-$HOME/.aw-workspace}/bin"
+AW_BIN_DIR="/usr/local/bin"
 
 echo "== npm-based agent CLIs: claude/codex/copilot =="
 bash scripts/install_claude.sh
