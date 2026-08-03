@@ -2,11 +2,14 @@
 Entrypoint referenced by aw-app.json's runtime.entrypoint
 ("code_agent_clis_app.plugin:CodeAgentClisAppPlugin").
 
-Plugs into the real F4 framework runtime: activate(ctx) installs each
+Plugs into the real F4 framework runtime: activate(ctx) (1) installs each
 declared system CLI THROUGH the gated ``ctx.commands`` facade (capability
 ``commands:install``), so every install is journaled and the framework
 reverts them on uninstall by replaying the journal (running
-scripts/uninstall.sh once). The install scripts are idempotent, so the
+scripts/uninstall.sh once), and (2) registers the agent-session-history
+sub-app (``routes.py``, backed by ``sessions.py``'s ``ctx.db`` overlay)
+THROUGH the gated ``ctx.routes``/``ctx.db`` facades, mounted by the runtime
+at ``/api/apps/code-agent-clis``. The install scripts are idempotent, so the
 reconciler safely re-runs activate on every boot / workspace recreation.
 
 Three of the four CLIs (claude, codex, copilot) are npm packages installed
@@ -21,6 +24,9 @@ from __future__ import annotations
 import json
 import logging
 import os
+
+from . import routes as routes_mod
+from .sessions import SessionStore
 
 log = logging.getLogger("aw_apps.code_agent_clis")
 
@@ -37,7 +43,11 @@ class CodeAgentClisAppPlugin:
                 cli["name"], cli["installer"], uninstall="scripts/uninstall.sh"
             )
             installed.append(cli["name"])
-        log.info("aw-app-code-agent-clis activated: installed %s", installed)
+
+        store = SessionStore(ctx)
+        ctx.routes.register(routes_mod.build_routes(store))
+
+        log.info("aw-app-code-agent-clis activated: installed %s, routes mounted", installed)
 
     async def deactivate(self) -> None:
         # Revert is driven by the framework's journal reverse-replay (it runs

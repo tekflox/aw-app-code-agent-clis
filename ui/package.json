@@ -1,0 +1,14 @@
+{
+  "name": "code-agent-clis-app-ui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Component-mode frontend for aw-app-code-agent-clis — the Agents nav menu (launch/resume claude/codex/copilot/cursor sessions), ported from aw-workspace-ui's AgentsNav.jsx and registered into the core.nav slot. src/client.js is the framework-free API client; src/plugin.jsx is the integrated-mode entry (register(host)), built as a Vite lib-mode bundle consumed by aw-app.json's contributes.frontend.bundle.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build"
+  },
+  "devDependencies": {
+    "vite": "^5.4.0"
+  }
+}

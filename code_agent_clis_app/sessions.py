@@ -1,0 +1,225 @@
+"""Agent-session history: on-disk discovery per CLI type + a ``ctx.db``-backed
+soft-delete overlay (this app's ``app__code_agent_clis__sessions`` table).
+
+Ported from the monolith's Postgres-backed ``agent_sessions`` table
+(``agentic-workspace/src/api/routes/terminal.py``/``terminal_manager.py``),
+but this workspace never mirrored that DB-driven design for terminals — the
+slim aw-workspace core dropped it entirely (see MIGRATION.md) on the
+assumption no agent CLIs would be installed. Since this app is exactly what
+now installs those CLIs, discovery here reads each CLI's own on-disk session
+files directly (same approach the monolith already used for Gemini, whose
+sessions were never in Postgres either) rather than resurrecting a live
+PromptDetector/screen-session pipeline — nothing in this app launches or
+supervises the CLI processes, that stays core terminal PTY infrastructure.
+
+Soft-delete ("hide from picker, keep the transcript on disk") is real
+persisted state, backed by this app's own workspace table via ``ctx.db``.
+"""
+
+from __future__ import annotations
+
+import datetime
+import glob
+import json
+import logging
+import os
+import sqlite3
+import time
+
+log = logging.getLogger("aw_apps.code_agent_clis.sessions")
+
+_TABLE = "app__code_agent_clis__sessions"
+
+_TABLE_DDL = """
+    session_id TEXT NOT NULL,
+    type TEXT NOT NULL,
+    hidden BOOLEAN NOT NULL DEFAULT false,
+    hidden_at DOUBLE PRECISION,
+    PRIMARY KEY (session_id, type)
+"""
+
+AGENT_TYPES = ("claude", "codex", "copilot", "cursor")
+
+
+def _claude_sessions() -> list[dict]:
+    """Each Claude Code conversation is one ``*.jsonl`` file under
+    ``~/.claude/projects/<escaped-cwd>/<session-uuid>.jsonl`` — the file
+    basename (minus extension) is the id ``claude --resume <id>`` expects.
+    """
+    base = os.path.join(os.path.expanduser("~"), ".claude", "projects")
+    out = []
+    for path in glob.glob(os.path.join(base, "**", "*.jsonl"), recursive=True):
+        try:
+            st = os.stat(path)
+        except OSError:
+            continue
+        session_id = os.path.splitext(os.path.basename(path))[0]
+        name = _first_user_message(path)
+        out.append({
+            "session_id": session_id,
+            "name": name,
+            "created_at": st.st_ctime,
+            "updated_at": st.st_mtime,
+        })
+    return out
+
+
+def _first_user_message(jsonl_path: str, max_len: int = 60) -> str | None:
+    """Best-effort session label: the first user message text, truncated —
+    mirrors what the picker shows for a "(untitled)" fallback otherwise."""
+    try:
+        with open(jsonl_path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    continue
+                msg = rec.get("message") if isinstance(rec, dict) else None
+                content = msg.get("content") if isinstance(msg, dict) else None
+                if rec.get("type") == "user" and isinstance(content, str) and content.strip():
+                    text = content.strip().splitlines()[0]
+                    return text[:max_len] + ("…" if len(text) > max_len else "")
+        return None
+    except OSError:
+        return None
+
+
+def _sqlite_rows(db_path: str, query: str) -> list[sqlite3.Row]:
+    """Read-only best-effort query — a live CLI may hold the db open (WAL
+    mode), so any failure (locked, missing, malformed) degrades to "no
+    sessions" rather than raising."""
+    if not os.path.exists(db_path):
+        return []
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=1.0)
+        conn.row_factory = sqlite3.Row
+        try:
+            return list(conn.execute(query))
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        log.warning("sessions: failed to read %s", db_path, exc_info=True)
+        return []
+
+
+def _row_timestamp(row: sqlite3.Row, base: str) -> float:
+    """``<base>``/``<base>_ms`` column-name ambiguity: prefer the explicit
+    ``_ms`` epoch-millis column when present, else parse ``<base>`` as
+    epoch-seconds or an ISO-8601 string."""
+    keys = row.keys()
+    if f"{base}_ms" in keys and row[f"{base}_ms"] is not None:
+        return row[f"{base}_ms"] / 1000.0
+    if base in keys and row[base] is not None:
+        val = row[base]
+        if isinstance(val, (int, float)):
+            return float(val)
+        try:
+            return datetime.datetime.fromisoformat(str(val).replace("Z", "+00:00")).timestamp()
+        except (ValueError, TypeError):
+            return 0.0
+    return 0.0
+
+
+def _codex_sessions() -> list[dict]:
+    """Codex CLI indexes its own rollout transcripts (``~/.codex/sessions/
+    <Y>/<M>/<D>/rollout-*-<uuid>.jsonl``) in a SQLite table, which is a far
+    better session-picker source than globbing the transcripts directly —
+    it already carries titles/previews/timestamps.
+    """
+    db_path = os.path.join(os.path.expanduser("~"), ".codex", "state_5.sqlite")
+    rows = _sqlite_rows(db_path, "SELECT * FROM threads")
+    out = []
+    for row in rows:
+        keys = row.keys()
+        if "archived" in keys and row["archived"]:
+            continue
+        name = None
+        for col in ("title", "first_user_message", "preview"):
+            if col in keys and row[col]:
+                name = row[col]
+                break
+        out.append({
+            "session_id": row["id"],
+            "name": name,
+            "created_at": _row_timestamp(row, "created_at"),
+            "updated_at": _row_timestamp(row, "updated_at"),
+        })
+    return out
+
+
+def _copilot_sessions() -> list[dict]:
+    """GitHub Copilot CLI keeps a ``sessions`` table (id/cwd/repository/
+    branch/summary/created_at/updated_at) in ``~/.copilot/session-store.db``
+    — resume via ``copilot --resume=<id>``.
+    """
+    db_path = os.path.join(os.path.expanduser("~"), ".copilot", "session-store.db")
+    rows = _sqlite_rows(db_path, "SELECT * FROM sessions")
+    out = []
+    for row in rows:
+        keys = row.keys()
+        name = row["summary"] if "summary" in keys and row["summary"] else None
+        if not name and "cwd" in keys and row["cwd"]:
+            name = os.path.basename(str(row["cwd"]).rstrip("/"))
+        out.append({
+            "session_id": row["id"],
+            "name": name,
+            "created_at": _row_timestamp(row, "created_at"),
+            "updated_at": _row_timestamp(row, "updated_at"),
+        })
+    return out
+
+
+def _cursor_sessions() -> list[dict]:
+    """cursor-agent has no local session-history file to discover — unlike
+    the other three CLIs, its session list/resume (``cursor-agent ls`` /
+    ``--resume``) is served from Cursor's own cloud backend once logged in
+    (``cursor-agent whoami``), not a local JSONL/sqlite store. There is
+    nothing on disk this app can glob, so this always returns empty — that
+    is a real CLI-architecture limitation, not a bug in this discovery code.
+    """
+    return []
+
+
+_DISCOVER = {
+    "claude": _claude_sessions,
+    "codex": _codex_sessions,
+    "copilot": _copilot_sessions,
+    "cursor": _cursor_sessions,
+}
+
+
+class SessionStore:
+    """``ctx.db``-backed hide/show overlay on top of on-disk discovery."""
+
+    def __init__(self, ctx):
+        self._ctx = ctx
+        ctx.db.create(_TABLE, _TABLE_DDL)
+
+    def _hidden_ids(self, agent_type: str) -> set[str]:
+        rows = self._ctx.db.execute(
+            _TABLE, "SELECT session_id FROM {table} WHERE type=:type AND hidden=true",
+            {"type": agent_type},
+        )
+        return {r._mapping["session_id"] for r in rows}
+
+    def list_sessions(self, agent_type: str) -> list[dict]:
+        discover = _DISCOVER.get(agent_type)
+        if discover is None:
+            return []
+        hidden = self._hidden_ids(agent_type)
+        sessions = [s for s in discover() if s["session_id"] not in hidden]
+        sessions.sort(key=lambda s: s["updated_at"], reverse=True)
+        return sessions
+
+    def hide_session(self, agent_type: str, session_id: str, restore: bool = False) -> None:
+        self._ctx.db.execute(
+            _TABLE,
+            "INSERT INTO {table} (session_id, type, hidden, hidden_at) "
+            "VALUES (:sid, :type, :hidden, :hidden_at) "
+            "ON CONFLICT (session_id, type) DO UPDATE SET hidden=:hidden, hidden_at=:hidden_at",
+            {"sid": session_id, "type": agent_type, "hidden": not restore,
+             "hidden_at": None if restore else time.time()},
+        )

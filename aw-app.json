@@ -2,8 +2,8 @@
   "manifest_version": 1,
   "id": "code-agent-clis",
   "name": "Code Agent CLIs",
-  "version": "0.2.1",
-  "description": "Installs AI coding-agent CLIs into the workspace: Claude Code (claude), OpenAI Codex (codex), GitHub Copilot CLI (copilot), and Cursor's cursor-agent. Pure command installs, no login/settings/secrets bundled here \u2014 each CLI still needs its own auth (e.g. `claude login`, `codex login`, `copilot`, `cursor-agent login`) run from a workspace terminal before use.",
+  "version": "0.3.0",
+  "description": "Installs AI coding-agent CLIs into the workspace: Claude Code (claude), OpenAI Codex (codex), GitHub Copilot CLI (copilot), and Cursor's cursor-agent \u2014 each CLI still needs its own auth (e.g. `claude login`, `codex login`, `copilot`, `cursor-agent login`) run from a workspace terminal before use. Also owns the Agents nav menu (launch/resume sessions per CLI type) and the agent-session-history API/DB backing it \u2014 decoupled from aw-workspace core per the 2026-08-03 architecture decision.",
   "category": "Runnables",
   "tier": "inprocess",
   "publisher": "TekFlox",
@@ -20,7 +20,11 @@
   "permissions": [
     "commands:install",
     "fs:workspace-data",
-    "net:outbound"
+    "net:outbound",
+    "routes:register",
+    "db:own-tables",
+    "ui:code",
+    "ui:slots:core.nav"
   ],
   "contributes": {
     "system_clis": [
@@ -40,7 +44,17 @@
         "name": "cursor-agent",
         "installer": "scripts/install_cursor.sh"
       }
-    ]
+    ],
+    "routes": [
+      {
+        "prefix": "/api/apps/code-agent-clis"
+      }
+    ],
+    "frontend": {
+      "mode": "component",
+      "bundle": "ui/dist/code-agent-clis.js",
+      "slots": ["core.nav"]
+    }
   },
   "dependencies": {
     "apps": [

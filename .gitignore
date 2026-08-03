@@ -4,3 +4,13 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 .tmp/
+
+# Node / frontend tooling
+node_modules/
+ui/node_modules/
+npm-debug.log*
+.npm/
+.vite/
+ui/.vite/
+ui/dist/
+ui/build/
