@@ -1,5 +1,5 @@
 """Agent-session history: on-disk discovery per CLI type + a ``ctx.db``-backed
-soft-delete overlay (this app's ``app__code_agent_clis__sessions`` table).
+soft-delete overlay (this app's ``app__code-agent-clis__sessions`` table).
 
 Ported from the monolith's Postgres-backed ``agent_sessions`` table
 (``agentic-workspace/src/api/routes/terminal.py``/``terminal_manager.py``),
@@ -28,7 +28,7 @@ import time
 
 log = logging.getLogger("aw_apps.code_agent_clis.sessions")
 
-_TABLE = "app__code_agent_clis__sessions"
+_TABLE = "app__code-agent-clis__sessions"
 
 _TABLE_DDL = """
     session_id TEXT NOT NULL,
