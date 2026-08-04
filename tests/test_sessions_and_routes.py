@@ -29,12 +29,17 @@ class FakeDb:
         self.conn.row_factory = sqlite3.Row
 
     def create(self, name, columns_sql):
-        self.conn.execute(f"CREATE TABLE IF NOT EXISTS {name} ({columns_sql})")
+        # Real DbTables._qualified() double-quotes the table name (see
+        # aw-workspace's src/apps/db_tables.py) — table names carry the
+        # app id, which may contain hyphens (e.g. "app__code-agent-clis__
+        # sessions"), invalid as a bare sqlite/postgres identifier. Mirror
+        # that quoting here so this fake matches the real backend.
+        self.conn.execute(f'CREATE TABLE IF NOT EXISTS "{name}" ({columns_sql})')
         self.conn.commit()
         return name
 
     def execute(self, name, sql, params=None):
-        stmt = sql.replace("{table}", name)
+        stmt = sql.replace("{table}", f'"{name}"')
         cur = self.conn.execute(stmt, params or {})
         self.conn.commit()
         if stmt.strip().lower().startswith("select"):
