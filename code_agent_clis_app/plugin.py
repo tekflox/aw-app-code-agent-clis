@@ -24,41 +24,23 @@ from __future__ import annotations
 import json
 import logging
 import os
-import subprocess
 
 from . import routes as routes_mod
 from .sessions import SessionStore
 
 log = logging.getLogger("aw_apps.code_agent_clis")
 
-# (relative-path-under-$HOME, kind) for each CLI's config/credential state
-# that must survive a container recreate. $HOME itself is NOT host-mounted
-# (only $AW_WORKSPACE_CONTAINER_DIR is — see aw-remote-host's
-# bootstrap/workspace/install.sh) so `claude login` etc. had to be redone
-# after every workspace update — found 2026-08-04. cursor-agent already
-# dodges this by redirecting HOME for its OWN installer
-# (scripts/install_cursor.sh); claude/codex/copilot run against the
-# terminal's real $HOME, so persist_home.sh symlinks their state into
-# AW_WORKSPACE_HOME instead. copilot's exact config path is unconfirmed
-# (not verified against a real login yet) — add it here once known.
-_PERSISTED_HOME_PATHS = [
-    (".claude", "dir"),
-    (".claude.json", "file"),
-    (".codex", "dir"),
-]
+# NOTE: CLI login/config state (~/.claude, ~/.claude.json, ~/.codex, ...)
+# used to need an app-level symlink trick (persist_home.sh, removed
+# 2026-08-04) to survive a workspace container recreate, because $HOME
+# itself wasn't host-mounted. Superseded by redirecting $HOME into the
+# already-persisted /opt/aw-workspace/.aw-workspace tree at the image level
+# (see aw-workspace's Dockerfile) — every path under $HOME just persists
+# directly now, no per-path bookkeeping needed here.
 
 
 class CodeAgentClisAppPlugin:
     async def activate(self, ctx) -> None:
-        script = os.path.join(ctx.package_dir, "scripts", "persist_home.sh")
-        for rel, kind in _PERSISTED_HOME_PATHS:
-            try:
-                subprocess.run(["bash", script, rel, kind], check=True,
-                               capture_output=True, text=True)
-            except subprocess.CalledProcessError as e:
-                log.warning("aw-app-code-agent-clis: persist_home failed for %s: %s",
-                            rel, e.stderr)
-
         with open(os.path.join(ctx.package_dir, "aw-app.json"), encoding="utf-8") as f:
             manifest = json.load(f)
 
