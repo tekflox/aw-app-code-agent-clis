@@ -40,24 +40,38 @@ if [ -L "$live" ]; then
 fi
 
 mkdir -p "$(dirname "$target")"
-if [ -e "$live" ]; then
-  if [ -e "$target" ]; then
-    # A persisted copy from a previous boot already exists — the live one is
-    # freshly created THIS boot (container recreate wiped $HOME), so it's
-    # safe to discard in favor of the durable copy.
-    rm -rf "$live"
-  else
+
+# $target (the durable copy) is authoritative whenever it already exists —
+# NEVER overwrite/recreate it just because $live looks fresh-and-empty.
+# Bug found 2026-08-04: the original version of this script assumed
+# "$live missing" meant "nothing has ever been persisted", and blindly
+# recreated $target (`: > "$target"` for a file — TRUNCATING it) in that
+# case. But "$live missing" is also exactly what a container recreate with
+# $HOME itself now host-mounted looks like on every boot AFTER the first —
+# the fresh empty mount has no ".claude.json" yet, even though the durable
+# copy from a real prior login is sitting right there in $target. That
+# would have silently wiped every login on the very next boot.
+if [ ! -e "$target" ]; then
+  if [ -e "$live" ]; then
     # First time this path is being persisted — move today's content over.
     mv "$live" "$target"
-  fi
-else
-  # Neither exists yet (e.g. the CLI hasn't been logged into at all) —
-  # pre-create an empty target so the symlink has somewhere real to land.
-  if [ "$kind" = "dir" ]; then
-    mkdir -p "$target"
   else
-    : > "$target"
+    # Neither exists yet (e.g. the CLI hasn't been logged into at all) —
+    # pre-create an empty target so the symlink has somewhere real to land.
+    if [ "$kind" = "dir" ]; then
+      mkdir -p "$target"
+    else
+      : > "$target"
+    fi
   fi
+fi
+
+# Whatever's left at $live at this point (if anything — a fresh boot's
+# empty dir, or leftover real content on a first activation where $target
+# already existed for some other reason) is superseded by $target; drop it
+# before symlinking over it.
+if [ -e "$live" ]; then
+  rm -rf "$live"
 fi
 
 ln -s "$target" "$live"
