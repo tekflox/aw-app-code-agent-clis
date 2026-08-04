@@ -37,9 +37,16 @@ const SLUG = 'code-agent-clis'; // must match aw-app.json's "id"
 const AGENT_TYPES_WITH_SESSIONS = new Set(['claude', 'codex', 'copilot', 'cursor']);
 
 export function register(host) {
+  // client.js composes these itself as fetchImpl(apiUrl(path)) — apiUrl
+  // already returns the fully `/api/apps/<slug>`-prefixed path, so fetchImpl
+  // must be the RAW fetch (host.sdk.api.fetch), not host.app.fetch (which
+  // prefixes AGAIN, e.g. /api/apps/code-agent-clis/api/apps/code-agent-clis/
+  // agent-sessions — 404). Every /agent-sessions call hit this double
+  // prefix — found 2026-08-04 chasing a persistent "GET /agent-sessions ->
+  // 404" in the Agents nav session picker.
   const client = createClient({
     apiUrl: host.app.apiUrl,
-    fetchImpl: host.app.fetch,
+    fetchImpl: host.sdk.api.fetch,
   });
 
   const { useState, useRef, useCallback, useEffect } = host.React;
