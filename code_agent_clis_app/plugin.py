@@ -39,6 +39,21 @@ log = logging.getLogger("aw_apps.code_agent_clis")
 # directly now, no per-path bookkeeping needed here.
 
 
+# Per-CLI health-check override for install_system_cli's default
+# "<name> --version" probe. cursor-agent's own binary writes a fresh
+# "~/.local/share" debug-session log file under /tmp/cursor-agent-logs-<uid>
+# on every single invocation, including a bare --version — and the runtime's
+# system-CLI healer (src/apps/runtime.py, every 300s) runs that probe forever,
+# so left alone it silently accumulates one throwaway log file per health
+# check indefinitely. CURSOR_AGENT_DISABLE_DEBUG_LOG=1 is the CLI's own
+# documented env var for suppressing that log; verified 2026-08-23 that it
+# stops the file from being created at all, without changing the version
+# check's behavior.
+_VERIFY_OVERRIDES = {
+    "cursor-agent": "CURSOR_AGENT_DISABLE_DEBUG_LOG=1 cursor-agent --version",
+}
+
+
 class CodeAgentClisAppPlugin:
     async def activate(self, ctx) -> None:
         with open(os.path.join(ctx.package_dir, "aw-app.json"), encoding="utf-8") as f:
@@ -48,7 +63,8 @@ class CodeAgentClisAppPlugin:
         installed = []
         for cli in clis:
             ctx.commands.install_system_cli(
-                cli["name"], cli["installer"], uninstall="scripts/uninstall.sh"
+                cli["name"], cli["installer"], uninstall="scripts/uninstall.sh",
+                verify=_VERIFY_OVERRIDES.get(cli["name"]),
             )
             installed.append(cli["name"])
 
