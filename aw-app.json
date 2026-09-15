@@ -62,6 +62,7 @@
       {
         "name": "Sync: Agents",
         "type": "terminal",
+        "enabled": true,
         "prompt": "aw-workspace-cli agent sync",
         "schedules": [
           {
