@@ -24,7 +24,8 @@
     "routes:register",
     "db:own-tables",
     "ui:code",
-    "ui:slots:core.nav"
+    "ui:slots:core.nav",
+    "tasks:contribute"
   ],
   "contributes": {
     "system_clis": [
@@ -56,7 +57,20 @@
       "slots": [
         "core.nav"
       ]
-    }
+    },
+    "tasks": [
+      {
+        "name": "Sync: Agents",
+        "type": "terminal",
+        "prompt": "aw-workspace-cli agent sync",
+        "schedules": [
+          {
+            "kind": "cron",
+            "expr": "*/30 * * * *"
+          }
+        ]
+      }
+    ]
   },
   "dependencies": {
     "apps": [
@@ -65,6 +79,12 @@
         "version": ">=0.8.0",
         "required": true,
         "reason": "claude/codex/copilot are npm-published packages, installed through the Node.js dev toolkit (nvm/node/npm) that the essentials app owns \u2014 it must be installed/loaded first."
+      },
+      {
+        "id": "tasks",
+        "version": ">=0.1.0",
+        "required": false,
+        "reason": "Provides the contributes.tasks surface that seeds the 'Sync: Agents' schedule. Non-required: the declaration is held and replayed when a provider appears, so this app installs cleanly either way and agent sync stays runnable by hand in the meantime."
       }
     ],
     "note": "Runtime-enforced app dependency: aw-workspace installs/loads essentials before code-agent-clis and keeps essentials loaded while code-agent-clis is desired."
