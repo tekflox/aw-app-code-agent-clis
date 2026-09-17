@@ -11,11 +11,12 @@ and therefore is the one that can discover their on-disk sessions).
 
   GET    /agent-sessions?type=<claude|codex|copilot|cursor>
   DELETE /agent-sessions/{session_id}?type=<...>&restore=<0|1>   (soft delete)
+  PUT    /agent-sessions/{session_id}?type=<...>   {name}        (rename override)
 """
 
 from __future__ import annotations
 
-from fastapi import FastAPI, Query
+from fastapi import Body, FastAPI, Query
 
 from .sessions import AGENT_TYPES, SessionStore
 
@@ -34,5 +35,16 @@ def build_routes(store: SessionStore) -> FastAPI:
                                   restore: int = Query(0)) -> dict:
         store.hide_session(type, session_id, restore=bool(restore))
         return {"success": True, "id": session_id, "visible": bool(restore)}
+
+    @app.put("/agent-sessions/{session_id}")
+    async def rename_agent_session(session_id: str, type: str = Query(...),
+                                    data: dict = Body(...)) -> dict:
+        if type not in AGENT_TYPES:
+            return {"success": False, "error": "unknown type"}
+        name = (data.get("name") or "").strip()
+        if not name:
+            return {"success": False, "error": "name required"}
+        store.rename_session(type, session_id, name)
+        return {"success": True, "id": session_id, "name": name}
 
     return app

@@ -120,3 +120,57 @@ def test_hidden_session_scoped_per_type(store):
         {"session_id": "aaa-1", "name": None, "created_at": 1.0, "updated_at": 1.0},
     ]
     assert [s["session_id"] for s in store.list_sessions("codex")] == ["aaa-1"]
+
+
+def test_rename_overrides_the_transcript_derived_name(client):
+    resp = client.put("/agent-sessions/aaa-1", params={"type": "claude"}, json={"name": "Rotacao de chaves"})
+    assert resp.status_code == 200
+    assert resp.json() == {"success": True, "id": "aaa-1", "name": "Rotacao de chaves"}
+
+    sessions = client.get("/agent-sessions", params={"type": "claude"}).json()
+    renamed = next(s for s in sessions if s["session_id"] == "aaa-1")
+    assert renamed["name"] == "Rotacao de chaves"
+    # The other session, never renamed, still shows its transcript-derived name.
+    other = next(s for s in sessions if s["session_id"] == "bbb-2")
+    assert other["name"] == "add feature"
+
+
+def test_rename_survives_repeated_discovery_calls(client, store):
+    # Regression for the reported bug: the transcript-derived name must not
+    # win back the slot on a later re-fetch (e.g. the flyout re-opening).
+    store.rename_session("claude", "aaa-1", "Rotacao de chaves")
+    for _ in range(3):
+        sessions = client.get("/agent-sessions", params={"type": "claude"}).json()
+        renamed = next(s for s in sessions if s["session_id"] == "aaa-1")
+        assert renamed["name"] == "Rotacao de chaves"
+
+
+def test_rename_scoped_per_type(store):
+    sessions_mod._DISCOVER["codex"] = lambda: [
+        {"session_id": "aaa-1", "name": "codex transcript name", "created_at": 1.0, "updated_at": 1.0},
+    ]
+    store.rename_session("claude", "aaa-1", "Rotacao de chaves")
+    assert store.list_sessions("claude")[0]["name"] == "Rotacao de chaves"
+    assert store.list_sessions("codex")[0]["name"] == "codex transcript name"
+
+
+def test_rename_unknown_type_rejected(client):
+    resp = client.put("/agent-sessions/aaa-1", params={"type": "gemini"}, json={"name": "x"})
+    assert resp.status_code == 200
+    assert resp.json()["success"] is False
+
+
+def test_rename_empty_name_rejected(client):
+    resp = client.put("/agent-sessions/aaa-1", params={"type": "claude"}, json={"name": "   "})
+    assert resp.status_code == 200
+    assert resp.json()["success"] is False
+    sessions = client.get("/agent-sessions", params={"type": "claude"}).json()
+    renamed = next(s for s in sessions if s["session_id"] == "aaa-1")
+    assert renamed["name"] == "fix the bug"
+
+
+def test_rename_does_not_unhide_a_hidden_session(client):
+    client.delete("/agent-sessions/aaa-1", params={"type": "claude"})
+    client.put("/agent-sessions/aaa-1", params={"type": "claude"}, json={"name": "Rotacao de chaves"})
+    remaining = client.get("/agent-sessions", params={"type": "claude"}).json()
+    assert [s["session_id"] for s in remaining] == ["bbb-2"]

@@ -92,6 +92,7 @@ _TABLE_DDL = """
     type TEXT NOT NULL,
     hidden BOOLEAN NOT NULL DEFAULT false,
     hidden_at DOUBLE PRECISION,
+    name TEXT,
     PRIMARY KEY (session_id, type)
 """
 
@@ -271,12 +272,27 @@ class SessionStore:
         )
         return {r._mapping["session_id"] for r in rows}
 
+    def _name_overrides(self, agent_type: str) -> dict[str, str]:
+        rows = self._ctx.db.execute(
+            _TABLE,
+            "SELECT session_id, name FROM {table} WHERE type=:type AND name IS NOT NULL",
+            {"type": agent_type},
+        )
+        return {r._mapping["session_id"]: r._mapping["name"] for r in rows}
+
     def list_sessions(self, agent_type: str) -> list[dict]:
         discover = _DISCOVER.get(agent_type)
         if discover is None:
             return []
         hidden = self._hidden_ids(agent_type)
-        sessions = [s for s in discover() if s["session_id"] not in hidden]
+        overrides = self._name_overrides(agent_type)
+        # Build new dicts rather than mutating discover()'s in place — its
+        # entries may be freshly built per call, but nothing here should
+        # assume that of every current or future discoverer.
+        sessions = [
+            {**s, "name": overrides[s["session_id"]]} if s["session_id"] in overrides else s
+            for s in discover() if s["session_id"] not in hidden
+        ]
         sessions.sort(key=lambda s: s["updated_at"], reverse=True)
         return sessions
 
@@ -288,4 +304,18 @@ class SessionStore:
             "ON CONFLICT (session_id, type) DO UPDATE SET hidden=:hidden, hidden_at=:hidden_at",
             {"sid": session_id, "type": agent_type, "hidden": not restore,
              "hidden_at": None if restore else time.time()},
+        )
+
+    def rename_session(self, agent_type: str, session_id: str, name: str) -> None:
+        """Persist a user-chosen name override, winning over the on-disk-
+        derived one in ``list_sessions`` — same upsert-without-clobbering-
+        other-columns pattern as ``hide_session`` above. ``hidden``/
+        ``hidden_at`` default to their "visible" values on first insert so a
+        rename of a never-hidden session doesn't accidentally hide it."""
+        self._ctx.db.execute(
+            _TABLE,
+            "INSERT INTO {table} (session_id, type, hidden, hidden_at, name) "
+            "VALUES (:sid, :type, false, NULL, :name) "
+            "ON CONFLICT (session_id, type) DO UPDATE SET name=:name",
+            {"sid": session_id, "type": agent_type, "name": name},
         )

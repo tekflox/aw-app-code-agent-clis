@@ -90,5 +90,7 @@
     ],
     "note": "Runtime-enforced app dependency: aw-workspace installs/loads essentials before code-agent-clis and keeps essentials loaded while code-agent-clis is desired."
   },
-  "migrations": {}
+  "migrations": {
+    "dir": "migrations"
+  }
 }
