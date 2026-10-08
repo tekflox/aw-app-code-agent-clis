@@ -12,7 +12,7 @@ if [ "$(id -u)" -ne 0 ]; then
   exec sudo -E bash "$0" "$@"
 fi
 
-AW_BIN_DIR="/usr/local/bin"
+AW_BIN_DIR="${AW_BIN_DIR:-/usr/local/bin}"
 
 # claude / codex / copilot — npm global packages installed through the
 # shared Node.js toolkit owned by the "essentials" app dependency (nvm/node

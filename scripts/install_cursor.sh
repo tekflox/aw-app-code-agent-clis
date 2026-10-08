@@ -18,7 +18,7 @@
 set -euo pipefail
 
 AW_HOME="${AW_WORKSPACE_HOME:-$HOME/.aw-workspace}"
-AW_BIN_DIR="/usr/local/bin"
+AW_BIN_DIR="${AW_BIN_DIR:-/usr/local/bin}"
 CURSOR_HOME="$AW_HOME/cursor-agent"
 mkdir -p "$CURSOR_HOME"
 

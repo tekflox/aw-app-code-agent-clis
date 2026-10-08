@@ -9,7 +9,7 @@
 set -euo pipefail
 
 export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
-AW_BIN_DIR="/usr/local/bin"
+AW_BIN_DIR="${AW_BIN_DIR:-/usr/local/bin}"
 
 if [ ! -s "$NVM_DIR/nvm.sh" ]; then
   echo "install_copilot.sh: nvm not found at $NVM_DIR — the essentials app (a required dependency) should have installed it" >&2
