@@ -174,3 +174,111 @@ def test_rename_does_not_unhide_a_hidden_session(client):
     client.put("/agent-sessions/aaa-1", params={"type": "claude"}, json={"name": "Rotacao de chaves"})
     remaining = client.get("/agent-sessions", params={"type": "claude"}).json()
     assert [s["session_id"] for s in remaining] == ["bbb-2"]
+
+
+# --- pagination envelope (GET /agent-sessions?limit=...) ----------------
+# Kanban card 4025bf3b-9510-8124-9a9c-f8bdb1f9ae47: without ``limit`` the
+# response MUST stay the bare array above (byte-compatible with today's
+# TerminalWindow.jsx/MobileApp.jsx callers) — ``limit`` opts into the new
+# {sessions, total, has_more} envelope.
+
+PAGINATION_SESSIONS = [
+    {"session_id": f"s-{i}", "name": f"session {i}", "created_at": float(i), "updated_at": float(100 - i)}
+    for i in range(10)
+]
+
+
+def test_no_limit_still_returns_a_bare_array(client):
+    resp = client.get("/agent-sessions", params={"type": "claude"})
+    assert resp.status_code == 200
+    assert isinstance(resp.json(), list)
+
+
+def test_limit_returns_envelope_with_total_and_has_more(client, store, monkeypatch):
+    monkeypatch.setitem(sessions_mod._DISCOVER, "claude", lambda: list(PAGINATION_SESSIONS))
+    resp = client.get("/agent-sessions", params={"type": "claude", "limit": 3})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert set(body.keys()) == {"sessions", "total", "has_more"}
+    assert body["total"] == 10
+    assert body["has_more"] is True
+    assert len(body["sessions"]) == 3
+    # Sorted by updated_at desc: session 0 has the highest updated_at (100).
+    assert [s["session_id"] for s in body["sessions"]] == ["s-0", "s-1", "s-2"]
+
+
+def test_limit_last_page_has_more_false(client, monkeypatch):
+    monkeypatch.setitem(sessions_mod._DISCOVER, "claude", lambda: list(PAGINATION_SESSIONS))
+    resp = client.get("/agent-sessions", params={"type": "claude", "limit": 20})
+    body = resp.json()
+    assert body["total"] == 10
+    assert body["has_more"] is False
+    assert len(body["sessions"]) == 10
+
+
+def test_before_cursor_pages_through_without_overlap(client, monkeypatch):
+    monkeypatch.setitem(sessions_mod._DISCOVER, "claude", lambda: list(PAGINATION_SESSIONS))
+    page1 = client.get("/agent-sessions", params={"type": "claude", "limit": 4}).json()
+    assert [s["session_id"] for s in page1["sessions"]] == ["s-0", "s-1", "s-2", "s-3"]
+
+    last_updated_at = page1["sessions"][-1]["updated_at"]
+    page2 = client.get(
+        "/agent-sessions",
+        params={"type": "claude", "limit": 4, "before": last_updated_at},
+    ).json()
+    assert [s["session_id"] for s in page2["sessions"]] == ["s-4", "s-5", "s-6", "s-7"]
+    assert page2["has_more"] is True
+
+    page3 = client.get(
+        "/agent-sessions",
+        params={"type": "claude", "limit": 4, "before": page2["sessions"][-1]["updated_at"]},
+    ).json()
+    assert [s["session_id"] for s in page3["sessions"]] == ["s-8", "s-9"]
+    assert page3["has_more"] is False
+
+
+def test_hidden_sessions_are_dropped_before_slicing_not_after(client, store, monkeypatch):
+    # Hiding one session must not shrink the page below `limit` just
+    # because a hidden row would otherwise have occupied a slot in it.
+    monkeypatch.setitem(sessions_mod._DISCOVER, "claude", lambda: list(PAGINATION_SESSIONS))
+    store.hide_session("claude", "s-1")
+    resp = client.get("/agent-sessions", params={"type": "claude", "limit": 3})
+    body = resp.json()
+    assert len(body["sessions"]) == 3
+    assert "s-1" not in [s["session_id"] for s in body["sessions"]]
+    assert body["total"] == 9
+
+
+def test_override_name_wins_even_though_it_is_applied_after_slicing(client, store, monkeypatch):
+    monkeypatch.setitem(sessions_mod._DISCOVER, "claude", lambda: list(PAGINATION_SESSIONS))
+    store.rename_session("claude", "s-0", "Rotacao de chaves")
+    resp = client.get("/agent-sessions", params={"type": "claude", "limit": 2})
+    renamed = next(s for s in resp.json()["sessions"] if s["session_id"] == "s-0")
+    assert renamed["name"] == "Rotacao de chaves"
+
+
+def test_name_resolution_call_count_equals_page_size_not_total(store, monkeypatch):
+    # The whole point of this fix: paginate the EXPENSIVE name resolution,
+    # not just the response. A page of 3 must resolve exactly 3 names, even
+    # when there are 10 claude sessions carrying a `path` to resolve from.
+    discovered = [
+        {"session_id": f"c-{i}", "name": None, "created_at": float(i),
+         "updated_at": float(100 - i), "path": f"/fake/c-{i}.jsonl"}
+        for i in range(10)
+    ]
+    monkeypatch.setitem(sessions_mod._DISCOVER, "claude", lambda: list(discovered))
+
+    calls = []
+
+    def fake_first_user_message(path, max_len=60):
+        calls.append(path)
+        return f"name for {path}"
+
+    monkeypatch.setattr(sessions_mod, "_first_user_message", fake_first_user_message)
+    sessions_mod._name_cache.clear()
+
+    page, total, has_more = store.list_sessions("claude", limit=3)
+    assert total == 10
+    assert has_more is True
+    assert len(calls) == 3
+    assert len(page) == 3

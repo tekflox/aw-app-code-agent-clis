@@ -36,6 +36,11 @@ const SLUG = 'code-agent-clis'; // must match aw-app.json's "id"
 // one of them (this app never installed/managed a gemini CLI).
 const AGENT_TYPES_WITH_SESSIONS = new Set(['claude', 'codex', 'copilot', 'cursor']);
 
+// Keeps the expensive per-page name resolution bounded (sessions.py's
+// _first_user_message read) regardless of how many sessions exist on disk
+// — see Kanban card 4025bf3b-9510-8124-9a9c-f8bdb1f9ae47.
+const PAGE_SIZE = 50;
+
 export function register(host) {
   // client.js composes these itself as fetchImpl(apiUrl(path)) — apiUrl
   // already returns the fully `/api/apps/<slug>`-prefixed path, so fetchImpl
@@ -111,6 +116,9 @@ export function register(host) {
     const [flyoutOpen, setFlyoutOpen] = useState(false);
     const [pos, setPos] = useState({ top: 0, left: 0 });
     const [sessions, setSessions] = useState(null);
+    const [total, setTotal] = useState(0);
+    const [hasMore, setHasMore] = useState(false);
+    const [loadingMore, setLoadingMore] = useState(false);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
     const rowRef = useRef(null);
@@ -170,16 +178,44 @@ export function register(host) {
       reportOpen();
       // Re-fetch every time the flyout opens — this app has no WS push (that
       // was monolith-only PromptDetector plumbing); a plain poll-on-open keeps
-      // this simple and correct enough for a picker menu.
+      // this simple and correct enough for a picker menu. Only the first
+      // page loads here; scrolling (or "Load more") pages in the rest.
       if (!isTerminalLauncher && !loading) {
         setLoading(true);
         setError(null);
-        client.listSessions(launcher.key)
-          .then((list) => setSessions(list))
+        client.listSessions(launcher.key, { limit: PAGE_SIZE })
+          .then(({ sessions: page, total: t, hasMore: hm }) => {
+            setSessions(page);
+            setTotal(t);
+            setHasMore(hm);
+          })
           .catch((e) => setError(e.message || 'Failed to load'))
           .finally(() => setLoading(false));
       }
     }, [supportsFlyout, cancelClose, reportOpen, isTerminalLauncher, loading]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    const loadMore = useCallback(() => {
+      if (loadingMore || !hasMore || !sessions || sessions.length === 0) return;
+      setLoadingMore(true);
+      const cursor = sessions[sessions.length - 1].updated_at;
+      client.listSessions(launcher.key, { limit: PAGE_SIZE, before: cursor })
+        .then(({ sessions: page, total: t, hasMore: hm }) => {
+          setSessions((prev) => {
+            const seen = new Set((prev || []).map((s) => s.session_id));
+            return [...(prev || []), ...page.filter((s) => !seen.has(s.session_id))];
+          });
+          setTotal(t);
+          setHasMore(hm);
+        })
+        .catch(() => {})
+        .finally(() => setLoadingMore(false));
+    }, [loadingMore, hasMore, sessions, launcher.key]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    const onSessionsScroll = useCallback((e) => {
+      if (isTerminalLauncher || !hasMore || loadingMore) return;
+      const el = e.currentTarget;
+      if (el.scrollHeight - el.scrollTop - el.clientHeight < 120) loadMore();
+    }, [isTerminalLauncher, hasMore, loadingMore, loadMore]);
 
     const sortedTerminals = [...(terminals || [])].sort((a, b) => {
       const aName = (a.name || '').toLowerCase();
@@ -239,6 +275,7 @@ export function register(host) {
           <div
             onMouseEnter={cancelClose}
             onMouseLeave={scheduleClose}
+            onScroll={onSessionsScroll}
             className="fixed bg-[var(--color-bg-secondary)] border border-[var(--color-border)] rounded-lg shadow-2xl shadow-black/60"
             style={{
               top: pos.top - 5,
@@ -262,7 +299,7 @@ export function register(host) {
               <svg className="w-3 h-3 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 5v14M5 12h14" /></svg>
               <span className="font-medium">{isTerminalLauncher ? 'New Terminal' : 'New Session'}</span>
               <span className="ml-auto text-[10px] text-[var(--color-text-muted)]">
-                {isTerminalLauncher ? (terminals?.length || 0) : (sessions?.length || 0)}
+                {isTerminalLauncher ? (terminals?.length || 0) : total}
               </span>
             </button>
 
@@ -338,8 +375,11 @@ export function register(host) {
                   </div>
                 ))}
                 {!loading && !error && sessions && sortedSessions.map((s) => {
-                  const display = s.name || '(untitled)';
                   const idSlice = s.session_id ? `${s.session_id.slice(0, 8)}-${s.session_id.slice(9, 13)}…` : '';
+                  // A noise-only transcript (stripped to nothing by
+                  // _first_user_message) must never fall back to showing
+                  // the literal "[SYSTEM]" marker — UUID+timestamp instead.
+                  const display = s.name || idSlice || '(untitled)';
                   let when = '';
                   const tsSrc = s.updated_at
                     ? new Date(s.updated_at * 1000)
@@ -354,6 +394,7 @@ export function register(host) {
                     // Optimistic local removal; no WS push in this app yet, so
                     // the next flyout open is what re-syncs from the server.
                     setSessions((prev) => (prev || []).filter((x) => x.session_id !== s.session_id));
+                    setTotal((prev) => Math.max(0, prev - 1));
                     client.hideSession(launcher.key, s.session_id).catch(() => {});
                   };
                   return (
@@ -397,6 +438,18 @@ export function register(host) {
                     </div>
                   );
                 })}
+                {!loading && !error && hasMore && (
+                  // Terminal fallback row for when 50 rows don't overflow
+                  // the flyout's own scrollbar (no scroll event ever fires
+                  // then, so page 2 would otherwise be unreachable).
+                  <button
+                    onClick={(e) => { e.stopPropagation(); loadMore(); }}
+                    disabled={loadingMore}
+                    className="w-full text-left px-3 py-2 text-xs text-[var(--color-text-muted)] hover:bg-white/5 disabled:opacity-60"
+                  >
+                    {loadingMore ? 'Loading…' : `Load more (${Math.max(0, total - (sessions?.length || 0))} remaining)`}
+                  </button>
+                )}
               </>
             )}
           </div>,

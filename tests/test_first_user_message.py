@@ -16,7 +16,11 @@ from tempfile import TemporaryDirectory
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from code_agent_clis_app.sessions import _first_user_message, _strip_injected_tags  # noqa: E402
+from code_agent_clis_app.sessions import (  # noqa: E402
+    _first_user_message,
+    _strip_dispatcher_wrapper,
+    _strip_injected_tags,
+)
 
 
 def _write_jsonl(path: Path, records: list[dict]) -> None:
@@ -78,3 +82,125 @@ def test_first_user_message_truncates_long_text():
         _write_jsonl(path, [_user_record(long_text)])
         result = _first_user_message(str(path), max_len=60)
         assert result == "x" * 60 + "…"
+
+
+# --- [SYSTEM]/[USER] dispatcher-wrapper naming fix ---------------------
+# Kanban card 4025bf3b-9510-8124-9a9c-f8bdb1f9ae47: every agents-platform-
+# dispatched session's first user message starts with "[SYSTEM]" (not an
+# XML tag, so the stripping above never touched it), and
+# _first_user_message used to return the literal truncated text "[SYSTEM]"
+# as the session name for nearly every one of them.
+
+def test_strip_dispatcher_wrapper_takes_text_after_last_user_marker():
+    wrapped = (
+        "[SYSTEM]\n"
+        "Execution context for this turn: NOTION_TASK_ID=abc\n"
+        "[SYSTEM]\n"
+        "You are part of this workspace's Dev Team.\n"
+        "[USER]\n"
+        "Fix the login bug"
+    )
+    assert _strip_dispatcher_wrapper(wrapped) == "Fix the login bug"
+
+
+def test_strip_dispatcher_wrapper_no_user_marker_is_pure_noise():
+    # No "[USER]" marker line at all — nothing real to surface.
+    assert _strip_dispatcher_wrapper("[SYSTEM]\nExecution context...") == ""
+
+
+def test_strip_dispatcher_wrapper_unwraps_telegram_user_message():
+    wrapped = (
+        "/aw-agent-telegram\n"
+        "CONTEXT:\n"
+        "- source: agents-platform\n"
+        "USER_MESSAGE:\n"
+        "something is wrong about the agents menu"
+    )
+    assert _strip_dispatcher_wrapper(wrapped) == "something is wrong about the agents menu"
+
+
+def test_strip_dispatcher_wrapper_telegram_skips_leading_upload_lines():
+    wrapped = (
+        "/aw-agent-telegram\n"
+        "CONTEXT:\n"
+        "USER_MESSAGE:\n"
+        "[UPLOAD] photo.jpg\n"
+        "[UPLOAD] another.jpg\n"
+        "the actual message text"
+    )
+    assert _strip_dispatcher_wrapper(wrapped) == "the actual message text"
+
+
+def test_strip_dispatcher_wrapper_telegram_without_user_message_marker_is_noise():
+    assert _strip_dispatcher_wrapper("/aw-agent-telegram\nCONTEXT:\nno marker here") == ""
+
+
+def test_strip_dispatcher_wrapper_knowledge_search_synthesis_is_noise():
+    assert _strip_dispatcher_wrapper("<<<CONTEXT>>>\nretrieved chunk text here") == ""
+
+
+def test_strip_dispatcher_wrapper_leaves_other_slash_commands_untouched():
+    # Non-telegram slash-command dispatches aren't unwrapped — the command
+    # name itself is a decent label (per the Architect's design: rule 4).
+    assert _strip_dispatcher_wrapper("/aw-system-analyst\ndaily audit") == "/aw-system-analyst\ndaily audit"
+
+
+def test_strip_injected_tags_combines_system_user_marker_and_telegram_unwrap():
+    # The realistic end-to-end shape: a [SYSTEM]/[USER]-wrapped message
+    # whose real content IS the telegram dispatcher's own wrapper.
+    wrapped = (
+        "[SYSTEM]\n"
+        "Execution context for this turn: NOTION_TASK_ID=abc\n"
+        "[USER]\n"
+        "/aw-agent-telegram\n"
+        "CONTEXT:\n"
+        "- source: agents-platform\n"
+        "USER_MESSAGE:\n"
+        "the agents menu is taking too long to load"
+    )
+    assert _strip_injected_tags(wrapped) == "the agents menu is taking too long to load"
+
+
+def test_first_user_message_strips_system_wrapper_from_a_real_transcript():
+    with TemporaryDirectory() as tmp:
+        path = Path(tmp) / "session.jsonl"
+        _write_jsonl(path, [
+            _user_record(
+                "[SYSTEM]\nExecution context for this turn: AW_RUN_ID=xyz\n"
+                "[USER]\nFix the login bug"
+            ),
+        ])
+        assert _first_user_message(str(path)) == "Fix the login bug"
+
+
+def test_first_user_message_falls_through_past_a_markerless_system_block():
+    # A [SYSTEM] block with no [USER] marker strips to "" and the scan
+    # continues to the NEXT user record, exactly like the pre-existing
+    # "<local-command-caveat>"-only-message case above.
+    with TemporaryDirectory() as tmp:
+        path = Path(tmp) / "session.jsonl"
+        _write_jsonl(path, [
+            _user_record("[SYSTEM]\nExecution context for this turn: AW_RUN_ID=xyz"),
+            _user_record("the real next message"),
+        ])
+        assert _first_user_message(str(path)) == "the real next message"
+
+
+def test_first_user_message_falls_through_past_knowledge_search_noise():
+    with TemporaryDirectory() as tmp:
+        path = Path(tmp) / "session.jsonl"
+        _write_jsonl(path, [
+            _user_record("<<<CONTEXT>>>\nretrieved chunk text here"),
+            _user_record("a real message after the synthesis noise"),
+        ])
+        assert _first_user_message(str(path)) == "a real message after the synthesis noise"
+
+
+def test_first_user_message_returns_none_for_an_all_noise_file():
+    with TemporaryDirectory() as tmp:
+        path = Path(tmp) / "session.jsonl"
+        _write_jsonl(path, [
+            _user_record("[SYSTEM]\nExecution context for this turn: AW_RUN_ID=xyz"),
+            _user_record("<<<CONTEXT>>>\nretrieved chunk text here"),
+        ])
+        assert _first_user_message(str(path)) is None

@@ -55,6 +55,7 @@ def _strip_injected_tags(text: str) -> str:
     cur = text.strip()
     while cur and cur != prev:
         prev = cur
+        cur = _strip_dispatcher_wrapper(cur)
         cur = re.sub(
             r"^# AGENTS\.md instructions for [^\n]*\s*<INSTRUCTIONS\b[^>]*>.*?</INSTRUCTIONS>\s*",
             "",
@@ -85,6 +86,47 @@ def _strip_injected_tags(text: str) -> str:
                 cur = (m.group(1).strip() + " " + m.group(2).strip()).strip()
     return cur
 
+
+# agents-platform-runners' dispatcher injects a bracket-style wrapper (not an
+# XML tag, so the loop above never touches it) as the literal first user
+# message of every run it dispatches — Kanban, Telegram, scheduled, any
+# run_agent_async caller. Measured live 2026-10-23: 400/400 recent sessions
+# under ~/.claude/projects/-opt-aw-workspace start with "[SYSTEM]" and carry
+# a "\n[USER]\n" marker line; without this, _first_user_message returns the
+# literal text "[SYSTEM]" as the session name for nearly every dispatched
+# session (see Kanban card 4025bf3b-9510-8124-9a9c-f8bdb1f9ae47).
+_USER_MARKER_RE = re.compile(r"^\[USER\]$", re.MULTILINE)
+# No re.MULTILINE: anchors to the START OF THE STRING only, so this peels
+# consecutive leading "[UPLOAD] ..." lines without touching one elsewhere
+# in the real message text.
+_TELEGRAM_UPLOAD_RE = re.compile(r"^(?:\[UPLOAD\][^\n]*\n)+")
+
+
+def _strip_dispatcher_wrapper(text: str) -> str:
+    """Peel the agents-platform-runners [SYSTEM]/[USER] wrapper, the
+    aw-agent-telegram USER_MESSAGE: block, and knowledge-search synthesis
+    noise — pre-step rules that run before the generic XML-tag stripping
+    above, since none of this is an XML tag."""
+    if text.startswith("[SYSTEM]"):
+        markers = list(_USER_MARKER_RE.finditer(text))
+        if not markers:
+            return ""
+        text = text[markers[-1].end():].lstrip("\n")
+
+    if text.startswith("/aw-agent-telegram"):
+        marker = "USER_MESSAGE:"
+        idx = text.find(marker)
+        if idx == -1:
+            return ""
+        text = text[idx + len(marker):].lstrip("\n")
+        text = _TELEGRAM_UPLOAD_RE.sub("", text).lstrip()
+
+    if text.startswith("<<<CONTEXT>>>"):
+        return ""
+
+    return text
+
+
 _TABLE = "app__code-agent-clis__sessions"
 
 _TABLE_DDL = """
@@ -103,6 +145,11 @@ def _claude_sessions() -> list[dict]:
     """Each Claude Code conversation is one ``*.jsonl`` file under
     ``~/.claude/projects/<escaped-cwd>/<session-uuid>.jsonl`` — the file
     basename (minus extension) is the id ``claude --resume <id>`` expects.
+
+    Cheap enumeration only (glob + stat — measured 0.20s for 9,712 files on
+    this container): ``name`` is left ``None`` and an internal ``path`` key
+    is carried so ``SessionStore.list_sessions`` can resolve names later for
+    just the requested page, instead of reading every transcript up front.
     """
     base = os.path.join(os.path.expanduser("~"), ".claude", "projects")
     out = []
@@ -112,14 +159,30 @@ def _claude_sessions() -> list[dict]:
         except OSError:
             continue
         session_id = os.path.splitext(os.path.basename(path))[0]
-        name = _first_user_message(path)
         out.append({
             "session_id": session_id,
-            "name": name,
+            "name": None,
             "created_at": st.st_ctime,
             "updated_at": st.st_mtime,
+            "path": path,
         })
     return out
+
+
+# {path: (mtime, name)} — repeated flyout hovers re-fetch the same page
+# over and over with no WS push to invalidate on; this spares re-reading a
+# transcript whose mtime hasn't moved since the last resolution. In-process
+# only: no persistence, no invalidation beyond the mtime mismatch check.
+_name_cache: dict[str, tuple[float, str | None]] = {}
+
+
+def _resolve_name_cached(path: str, mtime: float) -> str | None:
+    cached = _name_cache.get(path)
+    if cached is not None and cached[0] == mtime:
+        return cached[1]
+    name = _first_user_message(path)
+    _name_cache[path] = (mtime, name)
+    return name
 
 
 def _first_user_message(jsonl_path: str, max_len: int = 60) -> str | None:
@@ -280,21 +343,62 @@ class SessionStore:
         )
         return {r._mapping["session_id"]: r._mapping["name"] for r in rows}
 
-    def list_sessions(self, agent_type: str) -> list[dict]:
+    def list_sessions(
+        self, agent_type: str, limit: int | None = None, before: float | None = None,
+    ) -> list[dict] | tuple[list[dict], int, bool]:
+        """``limit=None`` (legacy callers: TerminalWindow.jsx, MobileApp.jsx,
+        a no-param API call) resolves names for every session and returns a
+        plain list, unchanged from before pagination existed.
+
+        ``limit`` given returns ``(page, total, has_more)`` instead: codex/
+        copilot/cursor already carry a name from their own on-disk store, so
+        paginating them is a no-op beyond slicing: only claude's per-file
+        ``_first_user_message`` read is actually bounded by it.
+
+        Pipeline order matters — hidden sessions must be dropped BEFORE
+        slicing (or a page shrinks below ``limit``), and overrides must be
+        applied AFTER slicing (so a renamed session keeps its name even
+        when its on-disk transcript yields nothing — the override always
+        wins, per v0.12.0).
+        """
         discover = _DISCOVER.get(agent_type)
         if discover is None:
-            return []
+            return ([], 0, False) if limit is not None else []
         hidden = self._hidden_ids(agent_type)
+        sessions = [s for s in discover() if s["session_id"] not in hidden]
+        # Tiebreak by session_id so a float-mtime tie sorts deterministically
+        # across pages instead of depending on discover()'s own ordering.
+        sessions.sort(key=lambda s: (s["updated_at"], s["session_id"]), reverse=True)
+        total = len(sessions)
+
+        page = sessions
+        if before is not None:
+            page = [s for s in page if s["updated_at"] < before]
+        has_more = False
+        if limit is not None:
+            has_more = len(page) > limit
+            page = page[:limit]
+
         overrides = self._name_overrides(agent_type)
-        # Build new dicts rather than mutating discover()'s in place — its
-        # entries may be freshly built per call, but nothing here should
-        # assume that of every current or future discoverer.
-        sessions = [
-            {**s, "name": overrides[s["session_id"]]} if s["session_id"] in overrides else s
-            for s in discover() if s["session_id"] not in hidden
-        ]
-        sessions.sort(key=lambda s: s["updated_at"], reverse=True)
-        return sessions
+        resolved = []
+        for s in page:
+            path = s.get("path")
+            if s["name"] is None and path is not None:
+                name = _resolve_name_cached(path, s["updated_at"])
+            else:
+                name = s["name"]
+            if s["session_id"] in overrides:
+                name = overrides[s["session_id"]]
+            resolved.append({
+                "session_id": s["session_id"],
+                "name": name,
+                "created_at": s["created_at"],
+                "updated_at": s["updated_at"],
+            })
+
+        if limit is None:
+            return resolved
+        return resolved, total, has_more
 
     def hide_session(self, agent_type: str, session_id: str, restore: bool = False) -> None:
         self._ctx.db.execute(

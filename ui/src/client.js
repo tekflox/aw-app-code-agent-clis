@@ -5,11 +5,23 @@
 //   fetchImpl: (path, init) => Promise<Response>
 
 export function createClient({ apiUrl, fetchImpl = fetch }) {
-  async function listSessions(type) {
-    const res = await fetchImpl(apiUrl(`/agent-sessions?type=${encodeURIComponent(type)}`));
+  // No-arg call keeps the legacy bare-array contract (TerminalWindow.jsx,
+  // MobileApp.jsx both still fetch this way). Passing { limit, before }
+  // opts into the paginated envelope { sessions, total, has_more } instead
+  // — the backend only resolves names for the requested page then.
+  async function listSessions(type, { limit, before } = {}) {
+    let qs = `type=${encodeURIComponent(type)}`;
+    if (limit != null) qs += `&limit=${encodeURIComponent(limit)}`;
+    if (before != null) qs += `&before=${encodeURIComponent(before)}`;
+    const res = await fetchImpl(apiUrl(`/agent-sessions?${qs}`));
     if (!res.ok) throw new Error(`GET /agent-sessions -> ${res.status}`);
     const data = await res.json();
-    return Array.isArray(data) ? data : [];
+    if (limit == null) return Array.isArray(data) ? data : [];
+    return {
+      sessions: Array.isArray(data?.sessions) ? data.sessions : [],
+      total: typeof data?.total === 'number' ? data.total : 0,
+      hasMore: !!data?.has_more,
+    };
   }
 
   async function hideSession(type, sessionId, { restore = false } = {}) {
