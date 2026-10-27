@@ -2,7 +2,7 @@
   "manifest_version": 1,
   "id": "code-agent-clis",
   "name": "Code Agent CLIs",
-  "version": "0.15.0",
+  "version": "0.16.0",
   "description": "Installs AI coding-agent CLIs into the workspace: Claude Code (claude), OpenAI Codex (codex), GitHub Copilot CLI (copilot), Cursor agent (cursor-agent), and Google Antigravity CLI (agy) \u2014 each CLI still needs its own authentication run from a workspace terminal before use. Also owns the Agents nav menu (launch/resume sessions per CLI type) and the agent-session-history API/DB backing it \u2014 decoupled from aw-workspace core per the 2026-08-03 architecture decision.",
   "category": "Runnables",
   "tier": "inprocess",
