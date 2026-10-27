@@ -4,7 +4,7 @@ Code Agent CLIs installs popular coding-agent command-line tools in an AW Worksp
 
 ## What It Does
 
-- Installs coding-agent CLIs such as Claude Code, Codex, GitHub Copilot CLI, and Cursor agent.
+- Installs Claude Code, Codex, GitHub Copilot CLI, Cursor agent, and Google Antigravity CLI (`agy`).
 - Adds an Agents menu to the workspace navigation.
 - Tracks agent session history so sessions can be resumed.
 - Keeps the installed tools available across workspace restarts.
@@ -15,7 +15,7 @@ Use this app when the workspace should support multiple coding agents from a ter
 
 ## How To Use It
 
-Install the app, then authenticate each CLI from a workspace terminal using that tool's normal login flow. After login, use the Agents menu or a terminal to launch and resume sessions.
+Install the app, then authenticate each CLI from a workspace terminal using that tool's normal login flow. Antigravity supports Google OAuth/keyring sign-in, or a Gemini API key after setting `modelProvider` to `gemini` in `~/.gemini/antigravity-cli/settings.json`. After login, use the Agents menu or a terminal to launch and resume sessions.
 
 ## What It Delivers
 

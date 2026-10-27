@@ -19,9 +19,12 @@ bash scripts/install_copilot.sh
 echo "== cursor-agent (vendor installer) =="
 bash scripts/install_cursor.sh
 
+echo "== Google Antigravity CLI (vendor installer) =="
+bash scripts/install_antigravity.sh
+
 echo "== resolution check (bin dir: $AW_BIN_DIR) =="
 export PATH="$AW_BIN_DIR:$PATH"
-for bin in claude codex copilot cursor-agent; do
+for bin in claude codex copilot cursor-agent agy; do
   which "$bin"
 done
 
@@ -30,10 +33,11 @@ claude --version
 codex --version
 copilot --version
 cursor-agent --version
+agy --version
 
 echo "== idempotency re-run (each install script must be safe to run twice) =="
-for s in install_claude install_codex install_copilot install_cursor; do
+for s in install_claude install_codex install_copilot install_cursor install_antigravity; do
   bash "scripts/${s}.sh"
 done
 
-echo "OK: all 4 code-agent CLIs installed and resolve"
+echo "OK: all 5 code-agent CLIs installed and resolve"

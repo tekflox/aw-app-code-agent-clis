@@ -12,11 +12,11 @@ THROUGH the gated ``ctx.routes``/``ctx.db`` facades, mounted by the runtime
 at ``/api/apps/code-agent-clis``. The install scripts are idempotent, so the
 reconciler safely re-runs activate on every boot / workspace recreation.
 
-Three of the four CLIs (claude, codex, copilot) are npm packages installed
+Three of the five CLIs (claude, codex, copilot) are npm packages installed
 through the shared Node.js toolkit the "essentials" app owns — declared as
 a required dependency in aw-app.json, so the reconciler installs/loads
-essentials before this app. cursor-agent ships via its own vendor
-installer and needs no Node.js.
+essentials before this app. cursor-agent and Antigravity's agy binary ship
+via their own vendor installers and need no Node.js.
 """
 
 from __future__ import annotations

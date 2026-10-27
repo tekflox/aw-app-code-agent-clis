@@ -138,7 +138,7 @@ _TABLE_DDL = """
     PRIMARY KEY (session_id, type)
 """
 
-AGENT_TYPES = ("claude", "codex", "copilot", "cursor")
+AGENT_TYPES = ("claude", "codex", "copilot", "cursor", "antigravity")
 
 
 def _claude_sessions() -> list[dict]:
@@ -313,11 +313,54 @@ def _cursor_sessions() -> list[dict]:
     return []
 
 
+def _antigravity_sessions() -> list[dict]:
+    """Discover the conversations Antigravity exposes locally.
+
+    Antigravity keeps its full conversation catalogue behind the authenticated
+    service.  The documented local cache only maps each absolute workspace
+    path to its most recent conversation id; that id is exactly what
+    ``agy --conversation <id>`` accepts.  Consequently this picker can expose
+    one resumable conversation per workspace, but must not invent titles or a
+    complete local history that the CLI does not provide.
+    """
+    cache_path = os.path.join(
+        os.path.expanduser("~"), ".gemini", "antigravity-cli", "cache",
+        "last_conversations.json",
+    )
+    try:
+        st = os.stat(cache_path)
+        with open(cache_path, encoding="utf-8") as f:
+            cache = json.load(f)
+    except (OSError, ValueError):
+        return []
+    if not isinstance(cache, dict):
+        return []
+
+    out = []
+    seen = set()
+    for workspace, conversation_id in cache.items():
+        if not isinstance(workspace, str) or not isinstance(conversation_id, str):
+            continue
+        conversation_id = conversation_id.strip()
+        if not conversation_id or conversation_id in seen:
+            continue
+        seen.add(conversation_id)
+        name = os.path.basename(workspace.rstrip(os.sep)) or workspace
+        out.append({
+            "session_id": conversation_id,
+            "name": name,
+            "created_at": st.st_ctime,
+            "updated_at": st.st_mtime,
+        })
+    return out
+
+
 _DISCOVER = {
     "claude": _claude_sessions,
     "codex": _codex_sessions,
     "copilot": _copilot_sessions,
     "cursor": _cursor_sessions,
+    "antigravity": _antigravity_sessions,
 }
 
 

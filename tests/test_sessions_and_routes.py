@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import sqlite3
 import sys
+import json
 from pathlib import Path
 
 import pytest
@@ -282,3 +283,31 @@ def test_name_resolution_call_count_equals_page_size_not_total(store, monkeypatc
     assert has_more is True
     assert len(calls) == 3
     assert len(page) == 3
+
+
+def test_antigravity_discovers_documented_last_conversation_cache(tmp_path, monkeypatch):
+    cache_dir = tmp_path / ".gemini" / "antigravity-cli" / "cache"
+    cache_dir.mkdir(parents=True)
+    (cache_dir / "last_conversations.json").write_text(json.dumps({
+        "/work/alpha": "conv-alpha",
+        "/work/beta": "conv-beta",
+        "/other/alpha-clone": "conv-alpha",
+        "/work/invalid": 123,
+    }))
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    discovered = sessions_mod._antigravity_sessions()
+
+    assert [(s["session_id"], s["name"]) for s in discovered] == [
+        ("conv-alpha", "alpha"),
+        ("conv-beta", "beta"),
+    ]
+
+
+def test_antigravity_invalid_or_missing_cache_is_empty(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    assert sessions_mod._antigravity_sessions() == []
+    cache_dir = tmp_path / ".gemini" / "antigravity-cli" / "cache"
+    cache_dir.mkdir(parents=True)
+    (cache_dir / "last_conversations.json").write_text("not-json")
+    assert sessions_mod._antigravity_sessions() == []

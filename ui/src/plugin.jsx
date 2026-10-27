@@ -16,7 +16,7 @@
 // instance" — external: ['react','react-dom'] in vite.config.js).
 //
 // This ports aw-workspace-ui's src/components/AgentsNav.jsx (the "Agents" nav
-// menu: launch/resume a claude/codex/copilot/cursor session, or a plain
+// menu: launch/resume a claude/codex/copilot/cursor/antigravity session, or a plain
 // terminal) into this app, per the 2026-08-03 decision to decouple it out of
 // core — see docs/knowledge_base/docs/architecture/monolith-migration-roadmap.md.
 // The plain-terminal PTY shell (TerminalWindow chrome, /ws/terminal/*) stays
@@ -34,7 +34,15 @@ const SLUG = 'code-agent-clis'; // must match aw-app.json's "id"
 // The CLI types this app installs and can discover on-disk sessions for
 // (routes.py/sessions.py AGENT_TYPES) — kept in sync manually; gemini isn't
 // one of them (this app never installed/managed a gemini CLI).
-const AGENT_TYPES_WITH_SESSIONS = new Set(['claude', 'codex', 'copilot', 'cursor']);
+const AGENT_TYPES_WITH_SESSIONS = new Set(['claude', 'codex', 'copilot', 'cursor', 'antigravity']);
+
+const ANTIGRAVITY_AGENT = {
+  type: 'antigravity',
+  label: 'Antigravity',
+  command: 'agy',
+  color: '#4285f4',
+  icon: 'antigravity',
+};
 
 // Keeps the expensive per-page name resolution bounded (sessions.py's
 // _first_user_message read) regardless of how many sessions exist on disk
@@ -77,6 +85,14 @@ export function register(host) {
       <svg className="w-3 h-3 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ color }}>
         <path d="M12 3l7.5 4.25v8.5L12 20l-7.5-4.25v-8.5L12 3z" />
         <path d="M8.5 9.5L12 7.5l3.5 2v5L12 16.5l-3.5-2v-5z" />
+      </svg>
+    ),
+    antigravity: () => (
+      <svg className="w-3 h-3 shrink-0" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M12 2.5c.7 5.3 4.2 8.8 9.5 9.5-5.3.7-8.8 4.2-9.5 9.5-.7-5.3-4.2-8.8-9.5-9.5 5.3-.7 8.8-4.2 9.5-9.5Z" fill="#4285F4" />
+        <path d="M12 2.5c.7 5.3 4.2 8.8 9.5 9.5H12V2.5Z" fill="#34A853" />
+        <path d="M12 12h9.5c-5.3.7-8.8 4.2-9.5 9.5V12Z" fill="#FBBC04" />
+        <path d="M2.5 12H12v9.5c-.7-5.3-4.2-8.8-9.5-9.5Z" fill="#EA4335" />
       </svg>
     ),
     terminal: () => (
@@ -511,7 +527,11 @@ export function register(host) {
     const totalCount = (agentSessions?.length || 0) + (terminals?.length || 0);
 
     const launchers = (() => {
-      const list = (aiAgents || []).map((a) => ({
+      const configured = [...(aiAgents || [])];
+      if (!configured.some((a) => a.type === ANTIGRAVITY_AGENT.type)) {
+        configured.push(ANTIGRAVITY_AGENT);
+      }
+      const list = configured.map((a) => ({
         key: a.type,
         label: a.type === 'terminal' ? 'Terminals' : (a.label || a.type),
         icon: a.icon,

@@ -3,7 +3,7 @@
 out — no real network/npm/curl involved, so this is safe to run in CI on a
 plain GitHub-hosted runner.
 
-For each of the four CLIs, asserts the install function invokes bash on
+For each of the five CLIs, asserts the install function invokes bash on
 the EXACT expected script path under SCRIPTS_DIR.
 
 Run: .venv/aw/bin/python -m pytest tests/test_installer.py -q
@@ -37,6 +37,7 @@ class CliInstallersTest(unittest.TestCase):
         (installer.install_codex, "install_codex.sh"),
         (installer.install_copilot, "install_copilot.sh"),
         (installer.install_cursor_agent, "install_cursor.sh"),
+        (installer.install_antigravity, "install_antigravity.sh"),
     ]
 
     @patch("code_agent_clis_app.installer.subprocess.run")
@@ -64,7 +65,7 @@ class AggregateInstallTest(unittest.TestCase):
         result = installer.install_all()
         self.assertEqual(
             set(result.keys()),
-            {"claude", "codex", "copilot", "cursor-agent"},
+            {"claude", "codex", "copilot", "cursor-agent", "agy"},
         )
 
     @patch("code_agent_clis_app.installer.subprocess.run")

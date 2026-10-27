@@ -30,3 +30,8 @@ rm -f "$AW_BIN_DIR"/{claude,codex,copilot}
 # workspace's persistent home.
 rm -f "$AW_BIN_DIR/cursor-agent"
 rm -rf "${AW_WORKSPACE_HOME:-$HOME/.aw-workspace}/cursor-agent"
+
+# Google Antigravity CLI — vendor installer, isolated binary home. User auth
+# and conversation cache live in the regular ~/.gemini tree and are retained.
+rm -f "$AW_BIN_DIR/agy"
+rm -rf "${AW_WORKSPACE_HOME:-$HOME/.aw-workspace}/antigravity-cli"
