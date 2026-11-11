@@ -24,7 +24,13 @@ if [ -x "$AW_BIN_DIR/codex" ] && "$AW_BIN_DIR/codex" --version >/dev/null 2>&1; 
   exit 0
 fi
 
-npm install -g @openai/codex >/dev/null
+# --cache points this npm call at a throwaway dir instead of the shared
+# ~/.npm cache: a pre-existing, unrelated root-owned-file corruption in that
+# shared cache made this npm install fail with EACCES (confirmed live on
+# fredericowu's workspace, 2026-11-11).
+codex_scratch_cache="$(mktemp -d)"
+npm install -g @openai/codex --cache "$codex_scratch_cache" >/dev/null
+rm -rf "$codex_scratch_cache"
 
 NODE_BIN_DIR="$(dirname "$(nvm which default)")"
 sudo ln -sf "$NODE_BIN_DIR/codex" "$AW_BIN_DIR/codex"

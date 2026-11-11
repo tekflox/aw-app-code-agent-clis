@@ -24,7 +24,13 @@ if [ -x "$AW_BIN_DIR/copilot" ] && "$AW_BIN_DIR/copilot" --version >/dev/null 2>
   exit 0
 fi
 
-npm install -g @github/copilot >/dev/null
+# --cache points this npm call at a throwaway dir instead of the shared
+# ~/.npm cache: a pre-existing, unrelated root-owned-file corruption in that
+# shared cache made this npm install fail with EACCES (confirmed live on
+# fredericowu's workspace, 2026-11-11).
+copilot_scratch_cache="$(mktemp -d)"
+npm install -g @github/copilot --cache "$copilot_scratch_cache" >/dev/null
+rm -rf "$copilot_scratch_cache"
 
 NODE_BIN_DIR="$(dirname "$(nvm which default)")"
 sudo ln -sf "$NODE_BIN_DIR/copilot" "$AW_BIN_DIR/copilot"
