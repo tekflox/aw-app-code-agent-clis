@@ -75,6 +75,13 @@
           }
         ]
       }
+    ],
+    "skills": [
+      {
+        "id": "aw-code-agent-clis",
+        "path": "skills/aw-code-agent-clis/SKILL.md",
+        "description": "Product behaviour and gotchas of the coding-agent CLIs this app installs, starting with Codex CLI's silent --model fallback and how to verify which model actually ran a session."
+      }
     ]
   },
   "dependencies": {
